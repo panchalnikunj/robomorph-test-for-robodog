@@ -3,24 +3,16 @@
 // ONE toolbox category: "RoboMorph"
 // Groups: Robotic Arm / Robot Dog / Otto Robot
 //
-// FIXES YOU ASKED:
-// 1) Forward "weird on first command" fixed:
-//    - dogMove() now FORCES the start angles immediately when you select a new action
-//      (so Forward works even as the first command after flashing).
+// Robot Dog updates in this version:
+// ✅ ONE block: Dog move [Forward/Backward/Left/Right/Stop] speed (1..5) — runs forever
+// ✅ Forward logic = EXACT from your latest forward image (change by 5)
+// ✅ Backward logic = from your image (change by 4)
+// ✅ Left/Right logic = from your image (change by 2)
+// ✅ Speed ONLY controls delay (max speed = 5)
+// ✅ FIX: Forward works correctly even as the FIRST command after flashing
+// ✅ Custom angle block = ONE block with dropdown for leg selection
+//    (and it auto-stops the dog so your custom pose stays)
 //
-// 2) Forward logic = EXACT from your latest forward image (change by 5)
-//    Backward/Left/Right = EXACT from your image (Backward: ±4, Left/Right: ±2)
-//
-// 3) Added 4 blocks to set custom angle of EACH DOG LEG
-//    - Dog Front Left angle
-//    - Dog Front Right angle
-//    - Dog Back Left angle
-//    - Dog Back Right angle
-//    (These also update internal FL/FR/BL/BR values. Use with Dog Stop for manual pose.)
-//
-// 4) Dog move block:
-//    - Direction dropdown: Forward/Backward/Left/Right/Stop
-//    - Speed only (1..5). No steps. Runs forever until you change action.
 // =====================================================
 
 //% blockHidden=true
@@ -253,7 +245,7 @@ namespace RoboMorph {
     // Default mapping: FL=S1, FR=S2, BL=S3, BR=S4
     let _dogCh: number[] = [0, 1, 2, 3]
 
-    // Gait state (same meaning as your blocks)
+    // Gait state (your FL/FR/BL/BR variables)
     let _FL = 90
     let _FR = 90
     let _BL = 90
@@ -267,11 +259,7 @@ namespace RoboMorph {
     let _dogLoopStarted = false
 
     function dogApplyAngles() {
-        // same order you used:
-        // Front Left -> FL
-        // Back Right -> BR
-        // Front Right -> FR
-        // Back Left -> BL
+        // order like your blocks:
         writeServoAngle(_dogCh[DogServo.FrontLeft], _FL)
         writeServoAngle(_dogCh[DogServo.BackRight], _BR)
         writeServoAngle(_dogCh[DogServo.FrontRight], _FR)
@@ -346,7 +334,6 @@ namespace RoboMorph {
             _FR = 90
             _BR = 90
 
-            // Use <= so it still works even if timing/speed causes skipping
             if (_FL <= DOG_MIN) _FL = DOG_MAX
             else _FL -= 2
 
@@ -357,7 +344,6 @@ namespace RoboMorph {
             _FL = 90
             _BL = 90
 
-            // Use >= so it still works even if timing/speed causes skipping
             if (_BR >= DOG_MAX) _BR = DOG_MIN
             else _BR += 2
 
@@ -385,8 +371,8 @@ namespace RoboMorph {
         _dogCh[servo] = port as number
     }
 
-    // ✅ ONE block: direction dropdown + speed (1..5), runs forever
-    // FIX: this forces start angles IMMEDIATELY when you select a new action
+    // ✅ ONE block (forever)
+    // FIX: Always enter the mode immediately (so Forward works at fresh start)
     //% group="Robot Dog"
     //% weight=90
     //% blockId="rm_dog_move_forever"
@@ -394,66 +380,33 @@ namespace RoboMorph {
     //% speed.min=1 speed.max=5
     export function dogMove(action: DogAction, speed: number) {
         _dogSpeed = clamp(speed, 1, 5)
-
-        // If action changed (or even same), set action and apply start angles NOW
-        // so Forward works immediately after flashing.
-        if (action != _dogAction) {
-            _dogAction = action
-            dogEnterMode(action)
-        } else {
-            // if same action, do nothing (keeps phase), but still ensures loop runs
-            _dogAction = action
-        }
-
+        _dogAction = action
+        dogEnterMode(action)     // <- key fix (forces correct start angles immediately)
         dogStartLoopOnce()
     }
 
-    // -----------------------------------------------------
-    // Custom angle blocks (each leg) — as you requested
-    // Best use: Dog move Stop, then set leg angles.
-    // -----------------------------------------------------
+    // ✅ Custom angle block with dropdown selection (your request)
+    // It auto-stops so the gait loop won't overwrite your custom pose.
     //% group="Robot Dog"
     //% weight=80
-    //% blockId="rm_dog_fl_angle"
-    //% block="Dog Front Left angle %angle °"
+    //% blockId="rm_dog_custom_leg_angle"
+    //% block="Dog set %leg angle %angle °"
     //% angle.min=0 angle.max=180
-    export function dogFrontLeftAngle(angle: number) {
-        _FL = clamp(angle, 0, 180)
-        dogApplyAngles()
-    }
+    export function dogSetLegAngle(leg: DogServo, angle: number) {
+        _dogAction = DogAction.Stop // keep pose
+        const a = clamp(angle, 0, 180)
 
-    //% group="Robot Dog"
-    //% weight=79
-    //% blockId="rm_dog_fr_angle"
-    //% block="Dog Front Right angle %angle °"
-    //% angle.min=0 angle.max=180
-    export function dogFrontRightAngle(angle: number) {
-        _FR = clamp(angle, 0, 180)
-        dogApplyAngles()
-    }
+        if (leg == DogServo.FrontLeft) _FL = a
+        else if (leg == DogServo.FrontRight) _FR = a
+        else if (leg == DogServo.BackLeft) _BL = a
+        else _BR = a
 
-    //% group="Robot Dog"
-    //% weight=78
-    //% blockId="rm_dog_bl_angle"
-    //% block="Dog Back Left angle %angle °"
-    //% angle.min=0 angle.max=180
-    export function dogBackLeftAngle(angle: number) {
-        _BL = clamp(angle, 0, 180)
         dogApplyAngles()
-    }
-
-    //% group="Robot Dog"
-    //% weight=77
-    //% blockId="rm_dog_br_angle"
-    //% block="Dog Back Right angle %angle °"
-    //% angle.min=0 angle.max=180
-    export function dogBackRightAngle(angle: number) {
-        _BR = clamp(angle, 0, 180)
-        dogApplyAngles()
+        dogStartLoopOnce()
     }
 
     // =====================================================
-    // OTTO ROBOT (kept minimal)
+    // OTTO ROBOT (minimal)
     // =====================================================
     export enum OttoServo {
         //% block="Left Hip"
