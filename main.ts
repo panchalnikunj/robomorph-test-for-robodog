@@ -3,18 +3,11 @@
 // ONE toolbox category: "RoboMorph"
 // Groups: Robotic Arm / Robot Dog / Otto Robot
 //
-// Robot Dog UPDATE (as you asked):
-// ✅ Only 4 servos: Front Left, Front Right, Back Left, Back Right
-// ✅ ONE movement block: direction dropdown (Forward/Backward/Left/Right/Stop) + Speed (1..5)
-// ✅ No steps. Runs FOREVER until you change action.
-// ✅ Forward logic = same as your 1st image (wrap 60..120, base step=4)
-// ✅ Backward logic = reverse of forward
-// ✅ Left/Right logic = same as your 2nd image (wrap 60..120, base step=2)
-//
-// Speed mapping:
-// - Forward/Backward step = 4 * speed
-// - Turn step = 2 * speed
-// - Delay gets smaller with higher speed (smooth update)
+// Robot Dog (4 servos) movement:
+// ✅ ONE block: Dog move [Forward/Backward/Left/Right/Stop] speed (1..5)
+// ✅ Runs forever until you change action
+// ✅ Forward = your 1st image logic
+// ✅ Backward/Left/Right = EXACT logic from your latest image
 // =====================================================
 
 //% blockHidden=true
@@ -127,7 +120,7 @@ namespace RoboMorph {
     }
 
     // =====================================================
-    // ROBOTIC ARM (same style: Set Channel -> Set Angle -> Pose -> Bool)
+    // ROBOTIC ARM (unchanged)
     // =====================================================
     export enum ArmJoint {
         //% block="Base"
@@ -222,7 +215,8 @@ namespace RoboMorph {
     }
 
     // =====================================================
-    // ROBOT DOG — 4 SERVOS + ONE MOVE BLOCK (forever)
+    // ROBOT DOG — 4 SERVOS + ONE MOVE BLOCK (FOREVER)
+    // Backward/Left/Right logic updated EXACTLY from your image
     // =====================================================
     export enum DogServo {
         //% block="Front Left"
@@ -233,11 +227,6 @@ namespace RoboMorph {
         BackLeft = 2,
         //% block="Back Right"
         BackRight = 3
-    }
-
-    export enum DogPose {
-        //% block="Center (90°)"
-        Center = 0
     }
 
     export enum DogAction {
@@ -256,7 +245,7 @@ namespace RoboMorph {
     // default mapping: FL=S1, FR=S2, BL=S3, BR=S4
     let _dogCh: number[] = [0, 1, 2, 3]
 
-    // gait state angles (like your variables FL/FR/BL/BR)
+    // gait state angles (same variable meaning as your blocks)
     let _FL = 90
     let _FR = 90
     let _BL = 90
@@ -266,12 +255,12 @@ namespace RoboMorph {
     const DOG_MAX = 120
 
     let _dogAction: DogAction = DogAction.Stop
-    let _dogPrevAction: DogAction = DogAction.Stop
+    let _dogPrevAction: DogAction = DogAction.Forward // force enter first time
     let _dogSpeed = 1
     let _dogLoopStarted = false
 
     function dogApplyAngles() {
-        // same order you used in blocks:
+        // same order you used:
         // Front Left -> FL
         // Back Right  -> BR
         // Front Right -> FR
@@ -283,26 +272,27 @@ namespace RoboMorph {
     }
 
     function dogEnterMode(m: DogAction) {
-        // set initial values exactly like your images
+        // initial values exactly like your screenshots
         if (m == DogAction.Forward) {
+            // (your forward start from image 1)
             _FL = 60
             _BR = 110
             _FR = 80
             _BL = 110
         } else if (m == DogAction.Backward) {
-            // reverse-start (safe & consistent)
+            // (your backward start from latest image)
             _FL = 120
-            _BL = 120
-            _FR = 60
-            _BR = 60
-        } else if (m == DogAction.Left || m == DogAction.Right || m == DogAction.Stop) {
+            _BR = 70
+            _FR = 100
+            _BL = 70
+        } else {
+            // Left / Right / Stop start with all 90 (as in image)
             _FL = 90; _FR = 90; _BL = 90; _BR = 90
         }
         dogApplyAngles()
     }
 
     function dogDelayMs(speed: number): number {
-        // higher speed => smaller delay (smoother/faster)
         // speed 1..5 -> 50..10 ms
         const s = clamp(speed, 1, 5)
         return 60 - (s * 10)
@@ -315,20 +305,19 @@ namespace RoboMorph {
         }
 
         const s = clamp(_dogSpeed, 1, 5)
-        const stepF = 4 * s   // forward/back step
-        const stepT = 2 * s   // turn step
+        const stepF = 4 * s   // base change by 4
+        const stepT = 2 * s   // base change by 2
 
         if (_dogAction == DogAction.Stop) {
-            // keep holding center
             dogApplyAngles()
             return
         }
 
-        // Apply current angles first (like your image)
+        // Always apply current angles first (exactly like your forever loops)
         dogApplyAngles()
 
         if (_dogAction == DogAction.Forward) {
-            // EXACT forward update logic (image 1)
+            // FORWARD (image 1)
             if (_FL > DOG_MAX) _FL = DOG_MIN
             else _FL += stepF
 
@@ -342,39 +331,45 @@ namespace RoboMorph {
             else _BL += stepF
         }
         else if (_dogAction == DogAction.Backward) {
-            // reverse of forward
+            // BACKWARD (latest image)
             if (_FL < DOG_MIN) _FL = DOG_MAX
             else _FL -= stepF
 
-            if (_BL < DOG_MIN) _BL = DOG_MAX
-            else _BL -= stepF
+            if (_BR > DOG_MAX) _BR = DOG_MIN
+            else _BR += stepF
 
             if (_FR > DOG_MAX) _FR = DOG_MIN
             else _FR += stepF
 
-            if (_BR > DOG_MAX) _BR = DOG_MIN
-            else _BR += stepF
+            if (_BL < DOG_MIN) _BL = DOG_MAX
+            else _BL -= stepF
         }
         else if (_dogAction == DogAction.Left) {
-            // EXACT left update logic (image 2): FL & BL go down, others stay 90
+            // LEFT (latest image)
+            // Keep right side fixed at 90 like your blocks
             _FR = 90
             _BR = 90
 
-            if (_FL == DOG_MIN) _FL = DOG_MAX
+            // Your blocks used "== 60", but with speed>1 you can skip 60.
+            // Using <= keeps it working for speed 1..5 while matching the same behavior.
+            if (_FL <= DOG_MIN) _FL = DOG_MAX
             else _FL -= stepT
 
-            if (_BL == DOG_MIN) _BL = DOG_MAX
+            if (_BL <= DOG_MIN) _BL = DOG_MAX
             else _BL -= stepT
         }
         else if (_dogAction == DogAction.Right) {
-            // EXACT right update logic (image 2): BR & FR go up, others stay 90
+            // RIGHT (latest image)
+            // Keep left side fixed at 90 like your blocks
             _FL = 90
             _BL = 90
 
-            if (_BR == DOG_MAX) _BR = DOG_MIN
+            // Your blocks used "== 120", but with speed>1 you can skip 120.
+            // Using >= keeps it working for speed 1..5 while matching the same behavior.
+            if (_BR >= DOG_MAX) _BR = DOG_MIN
             else _BR += stepT
 
-            if (_FR == DOG_MAX) _FR = DOG_MIN
+            if (_FR >= DOG_MAX) _FR = DOG_MIN
             else _FR += stepT
         }
     }
@@ -407,21 +402,9 @@ namespace RoboMorph {
         writeServoAngle(_dogCh[servo], angle)
     }
 
+    // ✅ ONE BLOCK (forever)
     //% group="Robot Dog"
     //% weight=80
-    //% blockId="rm_dog_pose_4"
-    //% block="Dog pose %pose"
-    export function dogPose(pose: DogPose) {
-        _dogAction = DogAction.Stop
-        _dogPrevAction = DogAction.Forward // force re-enter next time
-        _FL = 90; _FR = 90; _BL = 90; _BR = 90
-        dogApplyAngles()
-        dogStartLoopOnce()
-    }
-
-    // ✅ ONE BLOCK to control action forever
-    //% group="Robot Dog"
-    //% weight=70
     //% blockId="rm_dog_move_forever"
     //% block="Dog move %action speed %speed"
     //% speed.min=1 speed.max=5
