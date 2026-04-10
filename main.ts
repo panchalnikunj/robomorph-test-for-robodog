@@ -3,11 +3,18 @@
 // ONE toolbox category: "RoboMorph"
 // Groups: Robotic Arm / Robot Dog / Otto Robot
 //
-// UPDATE REQUEST (Robot Dog):
-// - Dog has ONLY 4 servos: Front Left, Front Right, Back Left, Back Right
-// - Forward gait = EXACT logic from your 1st image (60..120, step=4)
-// - Backward gait = reverse logic
-// - Turn Left / Right = EXACT logic from your 2nd image (step=2)
+// Robot Dog UPDATE (as you asked):
+// ✅ Only 4 servos: Front Left, Front Right, Back Left, Back Right
+// ✅ ONE movement block: direction dropdown (Forward/Backward/Left/Right/Stop) + Speed (1..5)
+// ✅ No steps. Runs FOREVER until you change action.
+// ✅ Forward logic = same as your 1st image (wrap 60..120, base step=4)
+// ✅ Backward logic = reverse of forward
+// ✅ Left/Right logic = same as your 2nd image (wrap 60..120, base step=2)
+//
+// Speed mapping:
+// - Forward/Backward step = 4 * speed
+// - Turn step = 2 * speed
+// - Delay gets smaller with higher speed (smooth update)
 // =====================================================
 
 //% blockHidden=true
@@ -120,8 +127,7 @@ namespace RoboMorph {
     }
 
     // =====================================================
-    // ROBOTIC ARM (same as before)
-    // Block order in toolbox: Set Channel -> Set Angle -> Pose -> Gripper bool
+    // ROBOTIC ARM (same style: Set Channel -> Set Angle -> Pose -> Bool)
     // =====================================================
     export enum ArmJoint {
         //% block="Base"
@@ -157,14 +163,16 @@ namespace RoboMorph {
 
     //% group="Robotic Arm"
     //% weight=100
-    //% blockId="rm_arm_set_channel" block="Arm set channel of %joint to %port"
+    //% blockId="rm_arm_set_channel"
+    //% block="Arm set channel of %joint to %port"
     export function armSetChannel(joint: ArmJoint, port: ServoPort) {
         _armCh[joint] = port as number
     }
 
     //% group="Robotic Arm"
     //% weight=90
-    //% blockId="rm_arm_set_angle" block="Arm set %joint angle %angle °"
+    //% blockId="rm_arm_set_angle"
+    //% block="Arm set %joint angle %angle °"
     //% angle.min=0 angle.max=180
     export function armSetAngle(joint: ArmJoint, angle: number) {
         writeServoAngle(_armCh[joint], angle)
@@ -172,7 +180,8 @@ namespace RoboMorph {
 
     //% group="Robotic Arm"
     //% weight=80
-    //% blockId="rm_arm_pose" block="Arm pose %pose"
+    //% blockId="rm_arm_pose"
+    //% block="Arm pose %pose"
     export function armPose(pose: ArmPose) {
         if (pose == ArmPose.Home) {
             armSetAngle(ArmJoint.Base, 90)
@@ -206,18 +215,14 @@ namespace RoboMorph {
 
     //% group="Robotic Arm"
     //% weight=70
-    //% blockId="rm_arm_gripper_bool" block="Arm gripper open %open"
+    //% blockId="rm_arm_gripper_bool"
+    //% block="Arm gripper open %open"
     export function armGripper(open: boolean) {
         armSetAngle(ArmJoint.Gripper, open ? 80 : 20)
     }
 
     // =====================================================
-    // ROBOT DOG — ONLY 4 SERVOS (your request)
-    // Block order in toolbox:
-    // 1) set channel
-    // 2) set angle
-    // 3) pose
-    // 4) movement blocks (forward/back/left/right)
+    // ROBOT DOG — 4 SERVOS + ONE MOVE BLOCK (forever)
     // =====================================================
     export enum DogServo {
         //% block="Front Left"
@@ -235,10 +240,23 @@ namespace RoboMorph {
         Center = 0
     }
 
-    // Default mapping: FL=S1, FR=S2, BL=S3, BR=S4
+    export enum DogAction {
+        //% block="Stop"
+        Stop = 0,
+        //% block="Forward"
+        Forward = 1,
+        //% block="Backward"
+        Backward = 2,
+        //% block="Left"
+        Left = 3,
+        //% block="Right"
+        Right = 4
+    }
+
+    // default mapping: FL=S1, FR=S2, BL=S3, BR=S4
     let _dogCh: number[] = [0, 1, 2, 3]
 
-    // Internal gait state (matches your variables FL/FR/BL/BR)
+    // gait state angles (like your variables FL/FR/BL/BR)
     let _FL = 90
     let _FR = 90
     let _BL = 90
@@ -246,34 +264,144 @@ namespace RoboMorph {
 
     const DOG_MIN = 60
     const DOG_MAX = 120
-    const STEP_FWD = 4
-    const STEP_TURN = 2
+
+    let _dogAction: DogAction = DogAction.Stop
+    let _dogPrevAction: DogAction = DogAction.Stop
+    let _dogSpeed = 1
+    let _dogLoopStarted = false
 
     function dogApplyAngles() {
-        // Same mapping you used in blocks:
-        // Front Left = FL, Back Right = BR, Front Right = FR, Back Left = BL
+        // same order you used in blocks:
+        // Front Left -> FL
+        // Back Right  -> BR
+        // Front Right -> FR
+        // Back Left   -> BL
         writeServoAngle(_dogCh[DogServo.FrontLeft], _FL)
         writeServoAngle(_dogCh[DogServo.BackRight], _BR)
         writeServoAngle(_dogCh[DogServo.FrontRight], _FR)
         writeServoAngle(_dogCh[DogServo.BackLeft], _BL)
     }
 
-    function dogDelay(speed: number): number {
-        // speed 1..10 -> delay big..small
-        const s = clamp(speed, 1, 10)
-        return Math.idiv(220, s) + 10
+    function dogEnterMode(m: DogAction) {
+        // set initial values exactly like your images
+        if (m == DogAction.Forward) {
+            _FL = 60
+            _BR = 110
+            _FR = 80
+            _BL = 110
+        } else if (m == DogAction.Backward) {
+            // reverse-start (safe & consistent)
+            _FL = 120
+            _BL = 120
+            _FR = 60
+            _BR = 60
+        } else if (m == DogAction.Left || m == DogAction.Right || m == DogAction.Stop) {
+            _FL = 90; _FR = 90; _BL = 90; _BR = 90
+        }
+        dogApplyAngles()
+    }
+
+    function dogDelayMs(speed: number): number {
+        // higher speed => smaller delay (smoother/faster)
+        // speed 1..5 -> 50..10 ms
+        const s = clamp(speed, 1, 5)
+        return 60 - (s * 10)
+    }
+
+    function dogTick() {
+        if (_dogAction != _dogPrevAction) {
+            dogEnterMode(_dogAction)
+            _dogPrevAction = _dogAction
+        }
+
+        const s = clamp(_dogSpeed, 1, 5)
+        const stepF = 4 * s   // forward/back step
+        const stepT = 2 * s   // turn step
+
+        if (_dogAction == DogAction.Stop) {
+            // keep holding center
+            dogApplyAngles()
+            return
+        }
+
+        // Apply current angles first (like your image)
+        dogApplyAngles()
+
+        if (_dogAction == DogAction.Forward) {
+            // EXACT forward update logic (image 1)
+            if (_FL > DOG_MAX) _FL = DOG_MIN
+            else _FL += stepF
+
+            if (_BR < DOG_MIN) _BR = DOG_MAX
+            else _BR -= stepF
+
+            if (_FR < DOG_MIN) _FR = DOG_MAX
+            else _FR -= stepF
+
+            if (_BL > DOG_MAX) _BL = DOG_MIN
+            else _BL += stepF
+        }
+        else if (_dogAction == DogAction.Backward) {
+            // reverse of forward
+            if (_FL < DOG_MIN) _FL = DOG_MAX
+            else _FL -= stepF
+
+            if (_BL < DOG_MIN) _BL = DOG_MAX
+            else _BL -= stepF
+
+            if (_FR > DOG_MAX) _FR = DOG_MIN
+            else _FR += stepF
+
+            if (_BR > DOG_MAX) _BR = DOG_MIN
+            else _BR += stepF
+        }
+        else if (_dogAction == DogAction.Left) {
+            // EXACT left update logic (image 2): FL & BL go down, others stay 90
+            _FR = 90
+            _BR = 90
+
+            if (_FL == DOG_MIN) _FL = DOG_MAX
+            else _FL -= stepT
+
+            if (_BL == DOG_MIN) _BL = DOG_MAX
+            else _BL -= stepT
+        }
+        else if (_dogAction == DogAction.Right) {
+            // EXACT right update logic (image 2): BR & FR go up, others stay 90
+            _FL = 90
+            _BL = 90
+
+            if (_BR == DOG_MAX) _BR = DOG_MIN
+            else _BR += stepT
+
+            if (_FR == DOG_MAX) _FR = DOG_MIN
+            else _FR += stepT
+        }
+    }
+
+    function dogStartLoopOnce() {
+        if (_dogLoopStarted) return
+        _dogLoopStarted = true
+        control.inBackground(function () {
+            while (true) {
+                dogTick()
+                basic.pause(dogDelayMs(_dogSpeed))
+            }
+        })
     }
 
     //% group="Robot Dog"
     //% weight=100
-    //% blockId="rm_dog_set_channel_4" block="Dog set channel of %servo to %port"
+    //% blockId="rm_dog_set_channel_4"
+    //% block="Dog set channel of %servo to %port"
     export function dogSetChannel(servo: DogServo, port: ServoPort) {
         _dogCh[servo] = port as number
     }
 
     //% group="Robot Dog"
     //% weight=90
-    //% blockId="rm_dog_set_angle_4" block="Dog set %servo angle %angle °"
+    //% blockId="rm_dog_set_angle_4"
+    //% block="Dog set %servo angle %angle °"
     //% angle.min=0 angle.max=180
     export function dogSetAngle(servo: DogServo, angle: number) {
         writeServoAngle(_dogCh[servo], angle)
@@ -281,142 +409,30 @@ namespace RoboMorph {
 
     //% group="Robot Dog"
     //% weight=80
-    //% blockId="rm_dog_pose_4" block="Dog pose %pose"
+    //% blockId="rm_dog_pose_4"
+    //% block="Dog pose %pose"
     export function dogPose(pose: DogPose) {
-        // Center
+        _dogAction = DogAction.Stop
+        _dogPrevAction = DogAction.Forward // force re-enter next time
         _FL = 90; _FR = 90; _BL = 90; _BR = 90
         dogApplyAngles()
+        dogStartLoopOnce()
     }
 
-    // ---------- Forward (your 1st image logic) ----------
+    // ✅ ONE BLOCK to control action forever
     //% group="Robot Dog"
     //% weight=70
-    //% blockId="rm_dog_forward_logic" block="Dog forward steps %steps speed %speed"
-    //% steps.min=1 steps.max=200 speed.min=1 speed.max=10
-    export function dogForward(steps: number, speed: number) {
-        // Same initial values you set in your program
-        _FL = 60
-        _BR = 110
-        _FR = 80
-        _BL = 110
-
-        const t = dogDelay(speed)
-        for (let i = 0; i < steps; i++) {
-            dogApplyAngles()
-
-            // EXACT update logic from your image
-            if (_FL > DOG_MAX) _FL = DOG_MIN
-            else _FL += STEP_FWD
-
-            if (_BR < DOG_MIN) _BR = DOG_MAX
-            else _BR -= STEP_FWD
-
-            if (_FR < DOG_MIN) _FR = DOG_MAX
-            else _FR -= STEP_FWD
-
-            if (_BL > DOG_MAX) _BL = DOG_MIN
-            else _BL += STEP_FWD
-
-            basic.pause(t)
-        }
-    }
-
-    // ---------- Backward (reverse of your forward gait) ----------
-    //% group="Robot Dog"
-    //% weight=60
-    //% blockId="rm_dog_backward_logic" block="Dog backward steps %steps speed %speed"
-    //% steps.min=1 steps.max=200 speed.min=1 speed.max=10
-    export function dogBackward(steps: number, speed: number) {
-        // Start centered
-        _FL = 90; _FR = 90; _BL = 90; _BR = 90
-
-        const t = dogDelay(speed)
-        for (let i = 0; i < steps; i++) {
-            dogApplyAngles()
-
-            // Reverse update direction (backward gait)
-            if (_FL < DOG_MIN) _FL = DOG_MAX
-            else _FL -= STEP_FWD
-
-            if (_BL < DOG_MIN) _BL = DOG_MAX
-            else _BL -= STEP_FWD
-
-            if (_FR > DOG_MAX) _FR = DOG_MIN
-            else _FR += STEP_FWD
-
-            if (_BR > DOG_MAX) _BR = DOG_MIN
-            else _BR += STEP_FWD
-
-            basic.pause(t)
-        }
-    }
-
-    // ---------- Turn Left (your 2nd image logic: FL & BL move down) ----------
-    //% group="Robot Dog"
-    //% weight=50
-    //% blockId="rm_dog_turn_left_logic" block="Dog turn left steps %steps speed %speed"
-    //% steps.min=1 steps.max=300 speed.min=1 speed.max=10
-    export function dogTurnLeft(steps: number, speed: number) {
-        // Your program sets all to 90 before turning
-        _FL = 90; _FR = 90; _BL = 90; _BR = 90
-
-        const t = dogDelay(speed)
-        for (let i = 0; i < steps; i++) {
-            dogApplyAngles()
-
-            // EXACT update logic from your image
-            if (_FL == DOG_MIN) _FL = DOG_MAX
-            else _FL -= STEP_TURN
-
-            if (_BL == DOG_MIN) _BL = DOG_MAX
-            else _BL -= STEP_TURN
-
-            // keep right side centered
-            _FR = 90
-            _BR = 90
-
-            basic.pause(t)
-        }
-    }
-
-    // ---------- Turn Right (your 2nd image logic: BR & FR move up) ----------
-    //% group="Robot Dog"
-    //% weight=40
-    //% blockId="rm_dog_turn_right_logic" block="Dog turn right steps %steps speed %speed"
-    //% steps.min=1 steps.max=300 speed.min=1 speed.max=10
-    export function dogTurnRight(steps: number, speed: number) {
-        // Your program sets all to 90 before turning
-        _FL = 90; _FR = 90; _BL = 90; _BR = 90
-
-        const t = dogDelay(speed)
-        for (let i = 0; i < steps; i++) {
-            dogApplyAngles()
-
-            // EXACT update logic from your image
-            if (_BR == DOG_MAX) _BR = DOG_MIN
-            else _BR += STEP_TURN
-
-            if (_FR == DOG_MAX) _FR = DOG_MIN
-            else _FR += STEP_TURN
-
-            // keep left side centered
-            _FL = 90
-            _BL = 90
-
-            basic.pause(t)
-        }
-    }
-
-    //% group="Robot Dog"
-    //% weight=30
-    //% blockId="rm_dog_stop_center" block="Dog stop (center)"
-    export function dogStop() {
-        dogPose(DogPose.Center)
+    //% blockId="rm_dog_move_forever"
+    //% block="Dog move %action speed %speed"
+    //% speed.min=1 speed.max=5
+    export function dogMove(action: DogAction, speed: number) {
+        _dogSpeed = clamp(speed, 1, 5)
+        _dogAction = action
+        dogStartLoopOnce()
     }
 
     // =====================================================
-    // OTTO ROBOT (same as before)
-    // Block order: set channel -> set angle -> pose -> walk(bool)
+    // OTTO ROBOT (kept same)
     // =====================================================
     export enum OttoServo {
         //% block="Left Hip"
@@ -438,14 +454,16 @@ namespace RoboMorph {
 
     //% group="Otto Robot"
     //% weight=100
-    //% blockId="rm_otto_set_channel" block="Otto set channel of %servo to %port"
+    //% blockId="rm_otto_set_channel"
+    //% block="Otto set channel of %servo to %port"
     export function ottoSetChannel(servo: OttoServo, port: ServoPort) {
         _ottoCh[servo] = port as number
     }
 
     //% group="Otto Robot"
     //% weight=90
-    //% blockId="rm_otto_set_angle" block="Otto set %servo angle %angle °"
+    //% blockId="rm_otto_set_angle"
+    //% block="Otto set %servo angle %angle °"
     //% angle.min=0 angle.max=180
     export function ottoSetAngle(servo: OttoServo, angle: number) {
         writeServoAngle(_ottoCh[servo], angle)
@@ -453,7 +471,8 @@ namespace RoboMorph {
 
     //% group="Otto Robot"
     //% weight=80
-    //% blockId="rm_otto_pose" block="Otto pose %pose"
+    //% blockId="rm_otto_pose"
+    //% block="Otto pose %pose"
     export function ottoPose(pose: OttoPose) {
         ottoSetAngle(OttoServo.LH, 90)
         ottoSetAngle(OttoServo.RH, 90)
@@ -463,7 +482,8 @@ namespace RoboMorph {
 
     //% group="Otto Robot"
     //% weight=70
-    //% blockId="rm_otto_walk_bool" block="Otto walk forward %forward steps %steps speed %speed"
+    //% blockId="rm_otto_walk_bool"
+    //% block="Otto walk forward %forward steps %steps speed %speed"
     //% steps.min=1 steps.max=200 speed.min=1 speed.max=10
     export function ottoWalk(forward: boolean, steps: number, speed: number) {
         const s = clamp(speed, 1, 10)
