@@ -3,13 +3,24 @@
 // ONE toolbox category: "RoboMorph"
 // Groups: Robotic Arm / Robot Dog / Otto Robot
 //
-// Robot Dog (4 servos) movement:
-// ✅ ONE block: Dog move [Forward/Backward/Left/Right/Stop] speed (1..5)
-// ✅ Runs forever until you change action
-// ✅ Forward logic = EXACT from your latest forward image (change by 5)
-// ✅ Backward logic = EXACT from your backward image (change by 4)
-// ✅ Left/Right logic = EXACT from your turn image (change by 2)
-// ✅ Speed ONLY controls loop delay (max speed = 5)
+// FIXES YOU ASKED:
+// 1) Forward "weird on first command" fixed:
+//    - dogMove() now FORCES the start angles immediately when you select a new action
+//      (so Forward works even as the first command after flashing).
+//
+// 2) Forward logic = EXACT from your latest forward image (change by 5)
+//    Backward/Left/Right = EXACT from your image (Backward: ±4, Left/Right: ±2)
+//
+// 3) Added 4 blocks to set custom angle of EACH DOG LEG
+//    - Dog Front Left angle
+//    - Dog Front Right angle
+//    - Dog Back Left angle
+//    - Dog Back Right angle
+//    (These also update internal FL/FR/BL/BR values. Use with Dog Stop for manual pose.)
+//
+// 4) Dog move block:
+//    - Direction dropdown: Forward/Backward/Left/Right/Stop
+//    - Speed only (1..5). No steps. Runs forever until you change action.
 // =====================================================
 
 //% blockHidden=true
@@ -63,6 +74,7 @@ namespace _PCA9685 {
         let counts = Math.round(pulseUs * _freq * 4096 / 1000000)
         if (counts < 0) counts = 0
         if (counts > 4095) counts = 4095
+
         const reg = LED0_ON_L + 4 * channel
         const b = pins.createBuffer(5)
         b[0] = reg
@@ -95,7 +107,7 @@ namespace RoboMorph {
     }
 
     // =====================================================
-    // Dropdown ports S1..S8  (S1=0 ... S8=7)
+    // Dropdown ports S1..S8 (S1=0 ... S8=7)
     // =====================================================
     export enum ServoPort {
         //% block="S1"
@@ -117,7 +129,7 @@ namespace RoboMorph {
     }
 
     // =====================================================
-    // ROBOTIC ARM (unchanged)
+    // ROBOTIC ARM (kept same)
     // =====================================================
     export enum ArmJoint {
         //% block="Base"
@@ -238,10 +250,10 @@ namespace RoboMorph {
         Right = 4
     }
 
-    // default mapping: FL=S1, FR=S2, BL=S3, BR=S4
+    // Default mapping: FL=S1, FR=S2, BL=S3, BR=S4
     let _dogCh: number[] = [0, 1, 2, 3]
 
-    // gait state angles (same meaning as your blocks)
+    // Gait state (same meaning as your blocks)
     let _FL = 90
     let _FR = 90
     let _BL = 90
@@ -251,7 +263,6 @@ namespace RoboMorph {
     const DOG_MAX = 120
 
     let _dogAction: DogAction = DogAction.Stop
-    let _dogPrevAction: DogAction = DogAction.Forward
     let _dogSpeed = 1
     let _dogLoopStarted = false
 
@@ -294,17 +305,14 @@ namespace RoboMorph {
     }
 
     function dogTick() {
-        if (_dogAction != _dogPrevAction) {
-            dogEnterMode(_dogAction)
-            _dogPrevAction = _dogAction
-        }
-
         if (_dogAction == DogAction.Stop) {
             dogApplyAngles()
             return
         }
 
-        // Apply angles first (like your forever loop)
+        // EXACT behavior like your forever blocks:
+        // 1) set angles
+        // 2) update variables
         dogApplyAngles()
 
         if (_dogAction == DogAction.Forward) {
@@ -320,8 +328,7 @@ namespace RoboMorph {
 
             if (_BL > DOG_MAX) _BL = DOG_MIN
             else _BL += 5
-        }
-        else if (_dogAction == DogAction.Backward) {
+        } else if (_dogAction == DogAction.Backward) {
             // BACKWARD (your image): change by 4
             if (_FL < DOG_MIN) _FL = DOG_MAX
             else _FL -= 4
@@ -334,23 +341,23 @@ namespace RoboMorph {
 
             if (_BL < DOG_MIN) _BL = DOG_MAX
             else _BL -= 4
-        }
-        else if (_dogAction == DogAction.Left) {
+        } else if (_dogAction == DogAction.Left) {
             // LEFT (your image): change by -2, only FL & BL move, FR/BR stay 90
             _FR = 90
             _BR = 90
 
+            // Use <= so it still works even if timing/speed causes skipping
             if (_FL <= DOG_MIN) _FL = DOG_MAX
             else _FL -= 2
 
             if (_BL <= DOG_MIN) _BL = DOG_MAX
             else _BL -= 2
-        }
-        else if (_dogAction == DogAction.Right) {
+        } else if (_dogAction == DogAction.Right) {
             // RIGHT (your image): change by +2, only FR & BR move, FL/BL stay 90
             _FL = 90
             _BL = 90
 
+            // Use >= so it still works even if timing/speed causes skipping
             if (_BR >= DOG_MAX) _BR = DOG_MIN
             else _BR += 2
 
@@ -378,7 +385,8 @@ namespace RoboMorph {
         _dogCh[servo] = port as number
     }
 
-    // ✅ ONE BLOCK (forever)
+    // ✅ ONE block: direction dropdown + speed (1..5), runs forever
+    // FIX: this forces start angles IMMEDIATELY when you select a new action
     //% group="Robot Dog"
     //% weight=90
     //% blockId="rm_dog_move_forever"
@@ -386,12 +394,66 @@ namespace RoboMorph {
     //% speed.min=1 speed.max=5
     export function dogMove(action: DogAction, speed: number) {
         _dogSpeed = clamp(speed, 1, 5)
-        _dogAction = action
+
+        // If action changed (or even same), set action and apply start angles NOW
+        // so Forward works immediately after flashing.
+        if (action != _dogAction) {
+            _dogAction = action
+            dogEnterMode(action)
+        } else {
+            // if same action, do nothing (keeps phase), but still ensures loop runs
+            _dogAction = action
+        }
+
         dogStartLoopOnce()
     }
 
+    // -----------------------------------------------------
+    // Custom angle blocks (each leg) — as you requested
+    // Best use: Dog move Stop, then set leg angles.
+    // -----------------------------------------------------
+    //% group="Robot Dog"
+    //% weight=80
+    //% blockId="rm_dog_fl_angle"
+    //% block="Dog Front Left angle %angle °"
+    //% angle.min=0 angle.max=180
+    export function dogFrontLeftAngle(angle: number) {
+        _FL = clamp(angle, 0, 180)
+        dogApplyAngles()
+    }
+
+    //% group="Robot Dog"
+    //% weight=79
+    //% blockId="rm_dog_fr_angle"
+    //% block="Dog Front Right angle %angle °"
+    //% angle.min=0 angle.max=180
+    export function dogFrontRightAngle(angle: number) {
+        _FR = clamp(angle, 0, 180)
+        dogApplyAngles()
+    }
+
+    //% group="Robot Dog"
+    //% weight=78
+    //% blockId="rm_dog_bl_angle"
+    //% block="Dog Back Left angle %angle °"
+    //% angle.min=0 angle.max=180
+    export function dogBackLeftAngle(angle: number) {
+        _BL = clamp(angle, 0, 180)
+        dogApplyAngles()
+    }
+
+    //% group="Robot Dog"
+    //% weight=77
+    //% blockId="rm_dog_br_angle"
+    //% block="Dog Back Right angle %angle °"
+    //% angle.min=0 angle.max=180
+    export function dogBackRightAngle(angle: number) {
+        _BR = clamp(angle, 0, 180)
+        dogApplyAngles()
+    }
+
     // =====================================================
-    // OTTO ROBOT (kept same)
+    // OTTO ROBOT (kept minimal)
     // =====================================================
     export enum OttoServo {
         //% block="Left Hip"
