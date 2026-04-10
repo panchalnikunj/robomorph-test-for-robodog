@@ -6,8 +6,10 @@
 // Robot Dog (4 servos) movement:
 // ✅ ONE block: Dog move [Forward/Backward/Left/Right/Stop] speed (1..5)
 // ✅ Runs forever until you change action
-// ✅ Forward = your 1st image logic
-// ✅ Backward/Left/Right = EXACT logic from your latest image
+// ✅ Forward logic = EXACT from your latest forward image (change by 5)
+// ✅ Backward logic = EXACT from your backward image (change by 4)
+// ✅ Left/Right logic = EXACT from your turn image (change by 2)
+// ✅ Speed ONLY controls loop delay (max speed = 5)
 // =====================================================
 
 //% blockHidden=true
@@ -56,24 +58,19 @@ namespace _PCA9685 {
         _inited = true
     }
 
-    export function setPWM(channel: number, on: number, off: number) {
-        if (!_inited) init(0x40, 50)
-        const reg = LED0_ON_L + 4 * channel
-        const b = pins.createBuffer(5)
-        b[0] = reg
-        b[1] = on & 0xFF
-        b[2] = (on >> 8) & 0xFF
-        b[3] = off & 0xFF
-        b[4] = (off >> 8) & 0xFF
-        pins.i2cWriteBuffer(_addr, b)
-    }
-
     export function setPulseUs(channel: number, pulseUs: number) {
         if (!_inited) init(0x40, 50)
         let counts = Math.round(pulseUs * _freq * 4096 / 1000000)
         if (counts < 0) counts = 0
         if (counts > 4095) counts = 4095
-        setPWM(channel, 0, counts)
+        const reg = LED0_ON_L + 4 * channel
+        const b = pins.createBuffer(5)
+        b[0] = reg
+        b[1] = 0
+        b[2] = 0
+        b[3] = counts & 0xFF
+        b[4] = (counts >> 8) & 0xFF
+        pins.i2cWriteBuffer(_addr, b)
     }
 }
 
@@ -216,7 +213,6 @@ namespace RoboMorph {
 
     // =====================================================
     // ROBOT DOG — 4 SERVOS + ONE MOVE BLOCK (FOREVER)
-    // Backward/Left/Right logic updated EXACTLY from your image
     // =====================================================
     export enum DogServo {
         //% block="Front Left"
@@ -245,7 +241,7 @@ namespace RoboMorph {
     // default mapping: FL=S1, FR=S2, BL=S3, BR=S4
     let _dogCh: number[] = [0, 1, 2, 3]
 
-    // gait state angles (same variable meaning as your blocks)
+    // gait state angles (same meaning as your blocks)
     let _FL = 90
     let _FR = 90
     let _BL = 90
@@ -255,16 +251,16 @@ namespace RoboMorph {
     const DOG_MAX = 120
 
     let _dogAction: DogAction = DogAction.Stop
-    let _dogPrevAction: DogAction = DogAction.Forward // force enter first time
+    let _dogPrevAction: DogAction = DogAction.Forward
     let _dogSpeed = 1
     let _dogLoopStarted = false
 
     function dogApplyAngles() {
         // same order you used:
         // Front Left -> FL
-        // Back Right  -> BR
+        // Back Right -> BR
         // Front Right -> FR
-        // Back Left   -> BL
+        // Back Left -> BL
         writeServoAngle(_dogCh[DogServo.FrontLeft], _FL)
         writeServoAngle(_dogCh[DogServo.BackRight], _BR)
         writeServoAngle(_dogCh[DogServo.FrontRight], _FR)
@@ -272,30 +268,29 @@ namespace RoboMorph {
     }
 
     function dogEnterMode(m: DogAction) {
-        // initial values exactly like your screenshots
         if (m == DogAction.Forward) {
-            // (your forward start from image 1)
+            // Forward start (your image)
             _FL = 60
             _BR = 110
             _FR = 80
             _BL = 110
         } else if (m == DogAction.Backward) {
-            // (your backward start from latest image)
+            // Backward start (your image)
             _FL = 120
             _BR = 70
             _FR = 100
             _BL = 70
         } else {
-            // Left / Right / Stop start with all 90 (as in image)
+            // Left / Right / Stop start
             _FL = 90; _FR = 90; _BL = 90; _BR = 90
         }
         dogApplyAngles()
     }
 
     function dogDelayMs(speed: number): number {
-        // speed 1..5 -> 50..10 ms
+        // speed 1..5 -> 100..20 ms
         const s = clamp(speed, 1, 5)
-        return 60 - (s * 10)
+        return 120 - (s * 20)
     }
 
     function dogTick() {
@@ -304,73 +299,63 @@ namespace RoboMorph {
             _dogPrevAction = _dogAction
         }
 
-        const s = clamp(_dogSpeed, 1, 5)
-        const stepF = 4 * s   // base change by 4
-        const stepT = 2 * s   // base change by 2
-
         if (_dogAction == DogAction.Stop) {
             dogApplyAngles()
             return
         }
 
-        // Always apply current angles first (exactly like your forever loops)
+        // Apply angles first (like your forever loop)
         dogApplyAngles()
 
         if (_dogAction == DogAction.Forward) {
-            // FORWARD (image 1)
+            // FORWARD (your latest forward image): change by 5
             if (_FL > DOG_MAX) _FL = DOG_MIN
-            else _FL += stepF
+            else _FL += 5
 
             if (_BR < DOG_MIN) _BR = DOG_MAX
-            else _BR -= stepF
+            else _BR -= 5
 
             if (_FR < DOG_MIN) _FR = DOG_MAX
-            else _FR -= stepF
+            else _FR -= 5
 
             if (_BL > DOG_MAX) _BL = DOG_MIN
-            else _BL += stepF
+            else _BL += 5
         }
         else if (_dogAction == DogAction.Backward) {
-            // BACKWARD (latest image)
+            // BACKWARD (your image): change by 4
             if (_FL < DOG_MIN) _FL = DOG_MAX
-            else _FL -= stepF
+            else _FL -= 4
 
             if (_BR > DOG_MAX) _BR = DOG_MIN
-            else _BR += stepF
+            else _BR += 4
 
             if (_FR > DOG_MAX) _FR = DOG_MIN
-            else _FR += stepF
+            else _FR += 4
 
             if (_BL < DOG_MIN) _BL = DOG_MAX
-            else _BL -= stepF
+            else _BL -= 4
         }
         else if (_dogAction == DogAction.Left) {
-            // LEFT (latest image)
-            // Keep right side fixed at 90 like your blocks
+            // LEFT (your image): change by -2, only FL & BL move, FR/BR stay 90
             _FR = 90
             _BR = 90
 
-            // Your blocks used "== 60", but with speed>1 you can skip 60.
-            // Using <= keeps it working for speed 1..5 while matching the same behavior.
             if (_FL <= DOG_MIN) _FL = DOG_MAX
-            else _FL -= stepT
+            else _FL -= 2
 
             if (_BL <= DOG_MIN) _BL = DOG_MAX
-            else _BL -= stepT
+            else _BL -= 2
         }
         else if (_dogAction == DogAction.Right) {
-            // RIGHT (latest image)
-            // Keep left side fixed at 90 like your blocks
+            // RIGHT (your image): change by +2, only FR & BR move, FL/BL stay 90
             _FL = 90
             _BL = 90
 
-            // Your blocks used "== 120", but with speed>1 you can skip 120.
-            // Using >= keeps it working for speed 1..5 while matching the same behavior.
             if (_BR >= DOG_MAX) _BR = DOG_MIN
-            else _BR += stepT
+            else _BR += 2
 
             if (_FR >= DOG_MAX) _FR = DOG_MIN
-            else _FR += stepT
+            else _FR += 2
         }
     }
 
@@ -393,18 +378,9 @@ namespace RoboMorph {
         _dogCh[servo] = port as number
     }
 
-    //% group="Robot Dog"
-    //% weight=90
-    //% blockId="rm_dog_set_angle_4"
-    //% block="Dog set %servo angle %angle °"
-    //% angle.min=0 angle.max=180
-    export function dogSetAngle(servo: DogServo, angle: number) {
-        writeServoAngle(_dogCh[servo], angle)
-    }
-
     // ✅ ONE BLOCK (forever)
     //% group="Robot Dog"
-    //% weight=80
+    //% weight=90
     //% blockId="rm_dog_move_forever"
     //% block="Dog move %action speed %speed"
     //% speed.min=1 speed.max=5
@@ -461,36 +437,5 @@ namespace RoboMorph {
         ottoSetAngle(OttoServo.RH, 90)
         ottoSetAngle(OttoServo.LF, 90)
         ottoSetAngle(OttoServo.RF, 90)
-    }
-
-    //% group="Otto Robot"
-    //% weight=70
-    //% blockId="rm_otto_walk_bool"
-    //% block="Otto walk forward %forward steps %steps speed %speed"
-    //% steps.min=1 steps.max=200 speed.min=1 speed.max=10
-    export function ottoWalk(forward: boolean, steps: number, speed: number) {
-        const s = clamp(speed, 1, 10)
-        const t = Math.idiv(200, s) + 10
-
-        for (let i = 0; i < steps; i++) {
-            if (forward) {
-                ottoSetAngle(OttoServo.LH, 80); ottoSetAngle(OttoServo.RH, 100)
-                ottoSetAngle(OttoServo.LF, 70); ottoSetAngle(OttoServo.RF, 110)
-                basic.pause(t)
-
-                ottoSetAngle(OttoServo.LH, 100); ottoSetAngle(OttoServo.RH, 80)
-                ottoSetAngle(OttoServo.LF, 110); ottoSetAngle(OttoServo.RF, 70)
-                basic.pause(t)
-            } else {
-                ottoSetAngle(OttoServo.LH, 80); ottoSetAngle(OttoServo.RH, 100)
-                ottoSetAngle(OttoServo.LF, 110); ottoSetAngle(OttoServo.RF, 70)
-                basic.pause(t)
-
-                ottoSetAngle(OttoServo.LH, 100); ottoSetAngle(OttoServo.RH, 80)
-                ottoSetAngle(OttoServo.LF, 70); ottoSetAngle(OttoServo.RF, 110)
-                basic.pause(t)
-            }
-        }
-        ottoPose(OttoPose.Home)
     }
 }
