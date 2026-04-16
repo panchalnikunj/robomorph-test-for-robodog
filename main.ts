@@ -3,14 +3,16 @@
 // ONE toolbox category: "RoboMorph"
 // Groups: Robotic Arm / Robot Dog / Otto Robot
 //
-// NEW (Robot Dog):
-// ✅ Added tricks: Sit, Hand Shake, Pee, Dance
-// ✅ Dog has 4 servos only: Front Left, Front Right, Back Left, Back Right
-// ✅ ONE movement block: Dog move [Forward/Backward/Left/Right/Stop] speed (1..5) — runs forever
-// ✅ Custom angle block with dropdown leg selection
-//
-// Note: With only 4 hip servos, tricks are "pose + swing" style (looks good in demo).
-// You can tweak angles later using the custom leg angle block.
+// Robot Dog (4 servos):
+// ✅ Dog move (Forward/Backward/Left/Right/Stop) speed (0..5) -> runs forever until changed
+// ✅ Forward/Backward/Left/Right logic kept as your provided screenshots
+// ✅ Stop = HOLD current pose (does NOT auto-center)
+// ✅ Dog set [leg] angle [°] (dropdown leg) for custom angles (auto-hold)
+// ✅ Added tricks with YOUR logic:
+//    - Sit
+//    - Handshake
+//    - Pee
+//    - Dance
 // =====================================================
 
 //% blockHidden=true
@@ -119,7 +121,7 @@ namespace RoboMorph {
     }
 
     // =====================================================
-    // ROBOTIC ARM (kept same)
+    // ROBOTIC ARM (unchanged)
     // =====================================================
     export enum ArmJoint {
         //% block="Base"
@@ -214,9 +216,9 @@ namespace RoboMorph {
     }
 
     // =====================================================
-    // ROBOT DOG — 4 SERVOS + MOVE + CUSTOM + TRICKS
+    // ROBOT DOG — 4 SERVOS + MOVE + CUSTOM + TRICKS (your logic)
     // =====================================================
-    export enum DogServo {
+    export enum DogLeg {
         //% block="Front Left"
         FrontLeft = 0,
         //% block="Front Right"
@@ -243,7 +245,7 @@ namespace RoboMorph {
     // Default mapping: FL=S1, FR=S2, BL=S3, BR=S4
     let _dogCh: number[] = [0, 1, 2, 3]
 
-    // State angles (same meaning as your blocks)
+    // Variables like your blocks
     let _FL = 90
     let _FR = 90
     let _BL = 90
@@ -253,51 +255,67 @@ namespace RoboMorph {
     const DOG_MAX = 120
 
     let _dogAction: DogAction = DogAction.Stop
-    let _dogSpeed = 1
     let _dogLoopStarted = false
+    let _dogSpeed = 1
 
     function dogApplyAngles() {
-        // order like your blocks:
-        writeServoAngle(_dogCh[DogServo.FrontLeft], _FL)
-        writeServoAngle(_dogCh[DogServo.BackRight], _BR)
-        writeServoAngle(_dogCh[DogServo.FrontRight], _FR)
-        writeServoAngle(_dogCh[DogServo.BackLeft], _BL)
+        // Same order you used in blocks:
+        // FL, BR, FR, BL
+        writeServoAngle(_dogCh[DogLeg.FrontLeft], _FL)
+        writeServoAngle(_dogCh[DogLeg.BackRight], _BR)
+        writeServoAngle(_dogCh[DogLeg.FrontRight], _FR)
+        writeServoAngle(_dogCh[DogLeg.BackLeft], _BL)
     }
 
+    function dogSetAngles(fl: number, fr: number, bl: number, br: number) {
+        _FL = clamp(fl, 0, 180)
+        _FR = clamp(fr, 0, 180)
+        _BL = clamp(bl, 0, 180)
+        _BR = clamp(br, 0, 180)
+        dogApplyAngles()
+    }
+
+    // Only called when selecting a moving action (NOT stop)
     function dogEnterMode(m: DogAction) {
         if (m == DogAction.Forward) {
+            // Forward start (your logic)
             _FL = 60
             _BR = 110
             _FR = 80
             _BL = 110
         } else if (m == DogAction.Backward) {
+            // Backward start (your logic)
             _FL = 120
             _BR = 70
             _FR = 100
             _BL = 70
-        } else {
+        } else if (m == DogAction.Left || m == DogAction.Right) {
+            // Turning start (your logic sets all 90)
             _FL = 90; _FR = 90; _BL = 90; _BR = 90
         }
         dogApplyAngles()
     }
 
     function dogDelayMs(speed: number): number {
+        // speed 1..5 -> 100..20 ms (faster)
         const s = clamp(speed, 1, 5)
-        return 120 - (s * 20) // 1..5 => 100..20
+        return 120 - (s * 20)
     }
 
     function dogTick() {
         if (_dogAction == DogAction.Stop) {
+            // HOLD pose
             dogApplyAngles()
             return
         }
 
-        // 1) apply angles
+        // Like your forever blocks:
+        // 1) set angles
         // 2) update variables
         dogApplyAngles()
 
         if (_dogAction == DogAction.Forward) {
-            // Forward (your image): change by 5
+            // FORWARD (your latest forward logic): change by 5
             if (_FL > DOG_MAX) _FL = DOG_MIN
             else _FL += 5
 
@@ -309,8 +327,9 @@ namespace RoboMorph {
 
             if (_BL > DOG_MAX) _BL = DOG_MIN
             else _BL += 5
-        } else if (_dogAction == DogAction.Backward) {
-            // Backward (your image): change by 4
+        }
+        else if (_dogAction == DogAction.Backward) {
+            // BACKWARD (your logic): change by 4
             if (_FL < DOG_MIN) _FL = DOG_MAX
             else _FL -= 4
 
@@ -322,25 +341,27 @@ namespace RoboMorph {
 
             if (_BL < DOG_MIN) _BL = DOG_MAX
             else _BL -= 4
-        } else if (_dogAction == DogAction.Left) {
-            // Left (your image): change by -2, only FL & BL move
+        }
+        else if (_dogAction == DogAction.Left) {
+            // LEFT (your logic): only FL & BL move, FR/BR fixed 90
             _FR = 90
             _BR = 90
 
-            if (_FL <= DOG_MIN) _FL = DOG_MAX
+            if (_FL == DOG_MIN) _FL = DOG_MAX
             else _FL -= 2
 
-            if (_BL <= DOG_MIN) _BL = DOG_MAX
+            if (_BL == DOG_MIN) _BL = DOG_MAX
             else _BL -= 2
-        } else if (_dogAction == DogAction.Right) {
-            // Right (your image): change by +2, only FR & BR move
+        }
+        else if (_dogAction == DogAction.Right) {
+            // RIGHT (your logic): only FR & BR move, FL/BL fixed 90
             _FL = 90
             _BL = 90
 
-            if (_BR >= DOG_MAX) _BR = DOG_MIN
+            if (_BR == DOG_MAX) _BR = DOG_MIN
             else _BR += 2
 
-            if (_FR >= DOG_MAX) _FR = DOG_MIN
+            if (_FR == DOG_MAX) _FR = DOG_MIN
             else _FR += 2
         }
     }
@@ -351,157 +372,130 @@ namespace RoboMorph {
         control.inBackground(function () {
             while (true) {
                 dogTick()
-                basic.pause(dogDelayMs(_dogSpeed))
+                if (_dogAction == DogAction.Stop) {
+                    basic.pause(20)
+                } else {
+                    basic.pause(dogDelayMs(_dogSpeed))
+                }
             }
         })
     }
 
-    function dogStopAndHold() {
-        _dogAction = DogAction.Stop
-        dogApplyAngles()
-    }
-
-    function dogSetAngles(fl: number, fr: number, bl: number, br: number) {
-        _FL = clamp(fl, 0, 180)
-        _FR = clamp(fr, 0, 180)
-        _BL = clamp(bl, 0, 180)
-        _BR = clamp(br, 0, 180)
-        dogApplyAngles()
-    }
-
     //% group="Robot Dog"
     //% weight=100
-    //% blockId="rm_dog_set_channel_4"
-    //% block="Dog set channel of %servo to %port"
-    export function dogSetChannel(servo: DogServo, port: ServoPort) {
-        _dogCh[servo] = port as number
+    //% blockId="rm_dog_set_channel"
+    //% block="Dog set channel of %leg to %port"
+    export function dogSetChannel(leg: DogLeg, port: ServoPort) {
+        _dogCh[leg] = port as number
     }
 
     //% group="Robot Dog"
     //% weight=90
-    //% blockId="rm_dog_move_forever"
+    //% blockId="rm_dog_move"
     //% block="Dog move %action speed %speed"
-    //% speed.min=1 speed.max=5
+    //% speed.min=0 speed.max=5
     export function dogMove(action: DogAction, speed: number) {
-        _dogSpeed = clamp(speed, 1, 5)
+        // speed=0 => keep previous speed (your dance ends with stop speed 0)
+        if (speed > 0) _dogSpeed = clamp(speed, 1, 5)
+
+        // Stop should HOLD (no auto-centering)
         _dogAction = action
-        dogEnterMode(action)     // force start angles immediately
+
+        if (action != DogAction.Stop) {
+            dogEnterMode(action) // sets correct start angles immediately (fixes "weird first forward")
+        }
+
         dogStartLoopOnce()
     }
 
     //% group="Robot Dog"
     //% weight=80
-    //% blockId="rm_dog_custom_leg_angle"
+    //% blockId="rm_dog_set_leg_angle"
     //% block="Dog set %leg angle %angle °"
     //% angle.min=0 angle.max=180
-    export function dogSetLegAngle(leg: DogServo, angle: number) {
-        dogStopAndHold() // keep your custom pose (movement won't overwrite)
+    export function dogSetLegAngle(leg: DogLeg, angle: number) {
+        // Auto-hold so movement doesn't overwrite
+        _dogAction = DogAction.Stop
+
         const a = clamp(angle, 0, 180)
-        if (leg == DogServo.FrontLeft) _FL = a
-        else if (leg == DogServo.FrontRight) _FR = a
-        else if (leg == DogServo.BackLeft) _BL = a
+        if (leg == DogLeg.FrontLeft) _FL = a
+        else if (leg == DogLeg.FrontRight) _FR = a
+        else if (leg == DogLeg.BackLeft) _BL = a
         else _BR = a
+
         dogApplyAngles()
         dogStartLoopOnce()
     }
 
     // -------------------------
-    // NEW TRICKS (4 servos style)
+    // TRICKS (YOUR PROVIDED LOGIC)
     // -------------------------
 
+    // SIT (your block)
     //% group="Robot Dog"
     //% weight=70
     //% blockId="rm_dog_sit"
     //% block="Dog sit"
     export function dogSit() {
-        dogStopAndHold()
-        // Simple sit pose (tweak later using custom angle block)
-        // Back legs swing forward, front legs slightly stabilize
-        dogSetAngles(95, 85, 60, 60)
-        basic.pause(500)
+        _dogAction = DogAction.Stop
+        dogSetAngles(100, 80, 25, 155)
     }
 
+    // HANDSHAKE (your sequence)
     //% group="Robot Dog"
     //% weight=69
     //% blockId="rm_dog_handshake"
-    //% block="Dog hand shake"
+    //% block="Dog handshake"
     export function dogHandShake() {
-        dogStopAndHold()
-        // Lean a bit to left so "front right" looks like waving
-        dogSetAngles(105, 90, 105, 90)
-        basic.pause(200)
+        _dogAction = DogAction.Stop
 
-        // Wave Front Right (FR) 3 times
-        for (let i = 0; i < 3; i++) {
-            _FR = 60
-            dogApplyAngles()
-            basic.pause(200)
-            _FR = 120
-            dogApplyAngles()
-            basic.pause(200)
-        }
+        dogSetAngles(100, 80, 25, 155)
+        basic.pause(1000)
 
-        // Return to center
-        dogSetAngles(90, 90, 90, 90)
-        basic.pause(200)
+        dogSetAngles(90, 180, 25, 130)
+        basic.pause(1000)
+
+        dogSetAngles(100, 80, 25, 155)
+        basic.pause(1000)
+
+        dogMove(DogAction.Stop, 1)
     }
 
+    // PEE (your sequence)
     //% group="Robot Dog"
     //% weight=68
     //% blockId="rm_dog_pee"
     //% block="Dog pee"
     export function dogPee() {
-        dogStopAndHold()
-        // Lean left and "lift" back right (BR) by swinging it
-        dogSetAngles(105, 90, 105, 90)
+        dogMove(DogAction.Stop, 1)
         basic.pause(200)
 
-        // Lift BR and wiggle
-        _BR = 60
-        dogApplyAngles()
-        basic.pause(300)
-
-        for (let i = 0; i < 4; i++) {
-            _BR = 70
-            dogApplyAngles()
-            basic.pause(150)
-            _BR = 55
-            dogApplyAngles()
-            basic.pause(150)
-        }
-
-        // Back to center
-        dogSetAngles(90, 90, 90, 90)
+        dogSetLegAngle(DogLeg.FrontLeft, 30)
         basic.pause(200)
+
+        dogSetAngles(30, 90, 90, 0)
+        basic.pause(2000)
+
+        dogMove(DogAction.Stop, 1)
     }
 
+    // DANCE (your sequence)
     //% group="Robot Dog"
     //% weight=67
     //% blockId="rm_dog_dance"
     //% block="Dog dance"
     export function dogDance() {
-        dogStopAndHold()
+        _dogAction = DogAction.Stop
 
-        // Wiggle left-right
-        for (let i = 0; i < 6; i++) {
-            // left forward, right back
-            dogSetAngles(60, 120, 60, 120)
-            basic.pause(180)
-            // left back, right forward
-            dogSetAngles(120, 60, 120, 60)
-            basic.pause(180)
-        }
-
-        // Small bounce effect
-        for (let j = 0; j < 3; j++) {
-            dogSetAngles(90, 90, 60, 60)
+        for (let i = 0; i < 5; i++) {
+            dogSetAngles(60, 60, 60, 60)
             basic.pause(200)
-            dogSetAngles(90, 90, 120, 120)
+
+            dogSetAngles(120, 120, 120, 120)
             basic.pause(200)
         }
 
-        dogSetAngles(90, 90, 90, 90)
-        basic.pause(200)
+        dogMove(DogAction.Stop, 0)
     }
 
     // =====================================================
