@@ -3,13 +3,17 @@
 // ONE toolbox category: "RoboMorph"
 // Groups: Robotic Arm / Robot Dog / Otto Robot
 //
-// Robot Dog (4 servos):
-// ✅ Dog move (Forward/Backward/Left/Right/Stop) speed (0..5) -> runs forever until changed
-// ✅ Forward/Backward/Left/Right logic = exactly as your screenshots (fixed steps 5/4/2)
-// ✅ Stop = HOLD current pose (no auto-center)
-// ✅ Dog set [leg] angle [°] (dropdown leg)
-// ✅ ONE extra block for ALL tricks via dropdown: Sit / Handshake / Pee / Dance
-//    (Includes STOP commands inside as per your screenshots)
+// IMPORTANT CHANGE (as you requested):
+// ✅ STOP command = STAND = set ALL 4 dog servos to 90°
+// ✅ Stand action: all servos 90° (available via Dog move Stop OR Dog trick Stand)
+//
+// Dog Custom Angle:
+// ✅ Still available: Dog set [leg] angle [°]
+// ✅ Works with tricks (because tricks use Stop + then set angles)
+// ✅ When you call Dog move Stop again -> it will re-center all to 90°
+//
+// Dog Movement:
+// ✅ Forward/Backward/Left/Right logic unchanged (as per your screenshots)
 // =====================================================
 
 //% blockHidden=true
@@ -239,15 +243,18 @@ namespace RoboMorph {
         Right = 4
     }
 
+    // ONE block dropdown for tricks
     export enum DogTrick {
+        //% block="Stand"
+        Stand = 0,
         //% block="Sit"
-        Sit = 0,
+        Sit = 1,
         //% block="Handshake"
-        Handshake = 1,
+        Handshake = 2,
         //% block="Pee"
-        Pee = 2,
+        Pee = 3,
         //% block="Dance"
-        Dance = 3
+        Dance = 4
     }
 
     // Default mapping: FL=S1, FR=S2, BL=S3, BR=S4
@@ -266,6 +273,10 @@ namespace RoboMorph {
     let _dogLoopStarted = false
     let _dogSpeed = 1
 
+    // This flag lets us hold a custom pose while action is Stop
+    // BUT: calling Dog move Stop will ALWAYS clear this and center to 90 (as you requested).
+    let _dogManualPose = false
+
     function dogApplyAngles() {
         // Same order you used in blocks: FL, BR, FR, BL
         writeServoAngle(_dogCh[DogLeg.FrontLeft], _FL)
@@ -275,6 +286,7 @@ namespace RoboMorph {
     }
 
     function dogSetAngles(fl: number, fr: number, bl: number, br: number) {
+        _dogManualPose = true
         _FL = clamp(fl, 0, 180)
         _FR = clamp(fr, 0, 180)
         _BL = clamp(bl, 0, 180)
@@ -282,7 +294,14 @@ namespace RoboMorph {
         dogApplyAngles()
     }
 
+    function dogCenter90() {
+        _dogManualPose = false
+        _FL = 90; _FR = 90; _BL = 90; _BR = 90
+        dogApplyAngles()
+    }
+
     function dogEnterMode(m: DogAction) {
+        _dogManualPose = false
         if (m == DogAction.Forward) {
             _FL = 60
             _BR = 110
@@ -307,7 +326,14 @@ namespace RoboMorph {
 
     function dogTick() {
         if (_dogAction == DogAction.Stop) {
-            dogApplyAngles()
+            // As you requested: Stop = Stand = ALL 90
+            // If user is in a manual pose (from tricks/custom block), we keep it,
+            // BUT when they call Dog move Stop, we clear manual pose and center.
+            if (!_dogManualPose) {
+                dogCenter90()
+            } else {
+                dogApplyAngles()
+            }
             return
         }
 
@@ -397,8 +423,11 @@ namespace RoboMorph {
 
         _dogAction = action
 
-        // Only set start angles for moving actions
-        if (action != DogAction.Stop) {
+        if (action == DogAction.Stop) {
+            // STOP logic: immediately center to 90 (stand)
+            dogCenter90()
+        } else {
+            // Moving actions: set start angles immediately (fixes fresh-start issues)
             dogEnterMode(action)
         }
 
@@ -411,8 +440,9 @@ namespace RoboMorph {
     //% block="Dog set %leg angle %angle °"
     //% angle.min=0 angle.max=180
     export function dogSetLegAngle(leg: DogLeg, angle: number) {
-        // custom angles should HOLD pose
+        // This is for making custom poses (it must NOT auto-center)
         _dogAction = DogAction.Stop
+        _dogManualPose = true
 
         const a = clamp(angle, 0, 180)
         if (leg == DogLeg.FrontLeft) _FL = a
@@ -430,16 +460,21 @@ namespace RoboMorph {
     //% blockId="rm_dog_trick"
     //% block="Dog trick %trick"
     export function dogTrick(trick: DogTrick) {
-        // All tricks must hold pose, so stop first
-        dogMove(DogAction.Stop, 1)
+        if (trick == DogTrick.Stand) {
+            dogMove(DogAction.Stop, 1) // Stand = Stop = all 90
+            return
+        }
 
         if (trick == DogTrick.Sit) {
             // SIT (your logic)
+            _dogAction = DogAction.Stop
             dogSetAngles(100, 80, 25, 155)
-            // (no extra stop shown in your sit screenshot)
+            return
         }
-        else if (trick == DogTrick.Handshake) {
+
+        if (trick == DogTrick.Handshake) {
             // HANDSHAKE (your logic)
+            dogMove(DogAction.Stop, 1) // stop included in your screenshot
             dogSetAngles(100, 80, 25, 155)
             basic.pause(1000)
 
@@ -449,34 +484,41 @@ namespace RoboMorph {
             dogSetAngles(100, 80, 25, 155)
             basic.pause(1000)
 
-            // STOP command included (your screenshot)
-            dogMove(DogAction.Stop, 1)
+            dogMove(DogAction.Stop, 1) // stop included in your screenshot
+            return
         }
-        else if (trick == DogTrick.Pee) {
+
+        if (trick == DogTrick.Pee) {
             // PEE (your logic)
             dogMove(DogAction.Stop, 1)
             basic.pause(200)
 
+            // Dog set Front Left angle 30
             dogSetLegAngle(DogLeg.FrontLeft, 30)
             basic.pause(200)
 
+            // Set pose
             dogSetAngles(30, 90, 90, 0)
             basic.pause(2000)
 
-            dogMove(DogAction.Stop, 1)
+            dogMove(DogAction.Stop, 1) // stop included in your screenshot
+            return
         }
-        else {
-            // DANCE (your logic)
-            for (let i = 0; i < 5; i++) {
-                dogSetAngles(60, 60, 60, 60)
-                basic.pause(200)
 
-                dogSetAngles(120, 120, 120, 120)
-                basic.pause(200)
-            }
-            // STOP speed 0 (your screenshot)
-            dogMove(DogAction.Stop, 0)
+        // DANCE (your logic)
+        _dogAction = DogAction.Stop
+        _dogManualPose = true
+
+        for (let i = 0; i < 5; i++) {
+            dogSetAngles(60, 60, 60, 60)
+            basic.pause(200)
+
+            dogSetAngles(120, 120, 120, 120)
+            basic.pause(200)
         }
+
+        // stop speed 0 (your screenshot) -> and stop must center 90
+        dogMove(DogAction.Stop, 0)
     }
 
     // =====================================================
